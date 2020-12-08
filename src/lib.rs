@@ -1,4 +1,4 @@
-//! An worker takes tasks and runs them.
+//! A worker takes tasks and runs them.
 //! When a task is complete the task calls the task's waker
 //! which wakes up any task waiting on the parent.
 //!
@@ -10,9 +10,12 @@
 
 // ---------------------
 
-// Currently tasks bounce between threads unnecessarily. 
-// Other threads should only be given an opportunity to steal if the current thread 
+// Currently tasks bounce between threads unnecessarily.
+// Other threads should only be given an opportunity to steal if the current thread
 // has multiple chunks of work it's awaiting.
+
+// It may be worth replacing some very short mutex locks with spinlocks.
+// This would allow the code to work properly on the main thread on Wasm.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -21,13 +24,13 @@ use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex};
 use std::task::Waker;
 use std::task::{Context, Poll};
+
 thread_local! {
     // The task queue and the other task queues should be separately borrowable
     // They can be stored in a struct with RefCells for each component that needs to be borrowed.
     pub static WORKER: RefCell<Worker<'static>> = RefCell::new(Worker::new());
 }
 /// Create workers for other threads and returns this thread's worker.
-
 pub fn create_workers(count: u32) {
     assert!(count > 0);
 
@@ -51,7 +54,7 @@ pub fn create_workers(count: u32) {
         other_task_queues.swap_remove(i);
         let new_task = new_task.clone();
         std::thread::spawn(move || {
-            println!("ID: {:?}", i);
+            // println!("ID: {:?}", i);
             create_worker(i, task_queue, other_task_queues, new_task);
 
             // Run the other threads forever waiting for work.
@@ -194,7 +197,7 @@ impl<'a> Worker<'a> {
     }
 
     fn enqueue_task(&self, task: Task<'a>) {
-        println!("ENQUEING TASK");
+        // println!("ENQUEING TASK");
         self.task_queue.lock().unwrap().push_back(Arc::new(task));
 
         // Notify other threads that work is available to steal.
@@ -281,7 +284,7 @@ impl<'a> Worker<'a> {
                 }
             }
 
-            println!("WORKER {:?}: No tasks in my queue", self.id);
+            // println!("WORKER {:?}: No tasks in my queue", self.id);
 
             // If I'm out of work then try to take tasks from other worker's queues
             for q in self.other_task_queues.iter() {
@@ -297,7 +300,7 @@ impl<'a> Worker<'a> {
 
             // If no tasks were available then go to sleep until tasks are available
             if !ran_a_task {
-                println!("WORKER {:?}: Waiting for tasks to steal", self.id);
+                // println!("WORKER {:?}: Waiting for tasks to steal", self.id);
 
                 // If I reach here then block until other tasks are enqueued.
                 let (lock, condvar) = &*self.new_task;
@@ -307,7 +310,7 @@ impl<'a> Worker<'a> {
                 }
                 *new_task = false;
 
-                println!("WORKER {:?}: Woken up to steal a task", self.id);
+                // println!("WORKER {:?}: Woken up to steal a task", self.id);
             }
         }
     }
@@ -346,27 +349,6 @@ pub fn run_current_thread_tasks() {
     WORKER.with(|w| w.borrow().run_current_thread_tasks())
 }
 
-/*
-mod do_nothing_waker {
-    use std::task::{RawWaker, RawWakerVTable, Waker};
-
-    pub fn create() -> Waker {
-        unsafe { Waker::from_raw(RAW_WAKER) }
-    }
-
-    const RAW_WAKER: RawWaker = RawWaker::new(std::ptr::null(), &VTABLE);
-    const VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
-
-    unsafe fn clone(_: *const ()) -> RawWaker {
-        RAW_WAKER
-    }
-    unsafe fn wake(_: *const ()) {}
-    unsafe fn wake_by_ref(_: *const ()) {}
-    unsafe fn drop(_: *const ()) {}
-}
-
-*/
-
 // This needs to store the TaskQueue to push to and the parent task to wake.
 // In what scenarios would a waker be cloned?
 // Does the parent task need to be stored in an option that's taken when waking the parent?
@@ -397,12 +379,12 @@ mod worker_enqueue_waker {
 
     // This consumes the data pointer
     unsafe fn wake(worker_data: *const ()) {
-        println!("WAKING");
+        // println!("WAKING");
         let worker_data = Arc::from_raw(worker_data as *const WakerData);
         let task_active = worker_data.task.inner_task.lock().unwrap().is_some();
 
         if task_active {
-            println!("TASK ACTIVE");
+            // println!("TASK ACTIVE");
             worker_data
                 .task_queue
                 .lock()
@@ -414,7 +396,7 @@ mod worker_enqueue_waker {
 
     // Do not consume the data pointer
     unsafe fn wake_by_ref(worker_data: *const ()) {
-        println!("WAKING BY REF");
+        // println!("WAKING BY REF");
 
         let worker_data = Arc::from_raw(worker_data as *const WakerData);
         let task_active = worker_data.task.inner_task.lock().unwrap().is_some();

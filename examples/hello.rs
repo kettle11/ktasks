@@ -2,7 +2,6 @@ use ktasks::*;
 use std::task::Poll;
 
 fn main() {
-    //let mut worker = Worker::new();
     create_workers(3);
 
     let task0 = spawn(async {
