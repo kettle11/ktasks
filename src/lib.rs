@@ -30,7 +30,9 @@ thread_local! {
     // They can be stored in a struct with RefCells for each component that needs to be borrowed.
     pub static WORKER: RefCell<Worker<'static>> = RefCell::new(Worker::new());
 }
-/// Create workers for other threads and returns this thread's worker.
+
+/// Create workers for this thread and other threads.
+/// Count must be 1 or greater.
 pub fn create_workers(count: u32) {
     assert!(count > 0);
 
@@ -49,11 +51,13 @@ pub fn create_workers(count: u32) {
     create_worker(0, queues[0].clone(), other_task_queues, new_task.clone());
 
     // Create workers for other threads.
+    // Only create workers for non-WebAssembly platforms, or WebAssembly if atomics are enabled.
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     for (i, task_queue) in queues.iter().cloned().enumerate().skip(1) {
         let mut other_task_queues = queues.clone();
         other_task_queues.swap_remove(i);
         let new_task = new_task.clone();
-        std::thread::spawn(move || {
+        let closure = move || {
             // println!("ID: {:?}", i);
             create_worker(i, task_queue, other_task_queues, new_task);
 
@@ -61,7 +65,13 @@ pub fn create_workers(count: u32) {
             WORKER.with(|w| {
                 w.borrow().run_forever();
             });
-        });
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        std::thread::spawn(closure);
+
+        #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+        kwasm::web_worker::spawn(closure);
     }
 }
 
@@ -178,6 +188,7 @@ impl<'a> Task<'a> {
 // Idling workers will wait on some sort of notification that a new task
 // has been added.
 pub struct Worker<'a> {
+    #[allow(unused)]
     id: usize,
     new_task: Arc<(Mutex<bool>, Condvar)>,
     task_queue: TaskQueue<'a>,
@@ -290,7 +301,7 @@ impl<'a> Worker<'a> {
             for q in self.other_task_queues.iter() {
                 let task = q.lock().unwrap().pop_front();
                 if let Some(task) = task {
-                    println!("WORKER {:?}: Stealing task!", self.id);
+                    //  kwasm::log(&format!("WORKER {:?}: Stealing task!", self.id));
                     task.run(&self);
                     ran_a_task = true;
                     // Only steal a single task before checking my own queue
@@ -335,8 +346,10 @@ impl<'a> Worker<'a> {
         }
     }
 
+    /*
     /// Block until new work arrives.
     pub fn wait_for_work(&mut self) {}
+    */
 }
 
 pub fn spawn<T: Send + 'static>(
