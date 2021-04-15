@@ -8,18 +8,19 @@ fn main() {
         println!("HERE IN TASK0");
         let result = spawn(async {
             println!("HERE IN SUBTASK --------");
-            400
-        }).await;
+            4
+        })
+        .await;
 
         println!("RESULT OF SUBTASK: {:?}", result);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(1));
 
         100 + result
     });
 
     task0.run();
 
-    std::thread::sleep(std::time::Duration::from_millis(5000));
+    std::thread::sleep(std::time::Duration::from_millis(50));
     run_current_thread_tasks();
 
     if let Poll::Ready(result) = task0.is_complete() {
