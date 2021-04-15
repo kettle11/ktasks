@@ -33,46 +33,52 @@ thread_local! {
 
 /// Create workers for this thread and other threads.
 /// Count must be 1 or greater.
+/// This should only be called once.
 pub fn create_workers(count: u32) {
-    assert!(count > 0);
+    use std::sync::Once;
+    static SETUP: Once = Once::new();
 
-    // Used to signal that a new task has been added.
-    // Wakes other threads that may be waiting to potentially steal work.
-    let new_task = Arc::new((Mutex::new(false), Condvar::new()));
+    SETUP.call_once(|| {
+        assert!(count > 0);
 
-    // Create the task queues for the workers
-    let queues: Vec<TaskQueue> = (0..count)
-        .map(|_| Arc::new(Mutex::new(VecDeque::new())))
-        .collect();
+        // Used to signal that a new task has been added.
+        // Wakes other threads that may be waiting to potentially steal work.
+        let new_task = Arc::new((Mutex::new(false), Condvar::new()));
 
-    // Create a worker for this thread.
-    let mut other_task_queues = queues.clone();
-    other_task_queues.swap_remove(0);
-    create_worker(0, queues[0].clone(), other_task_queues, new_task.clone());
+        // Create the task queues for the workers
+        let queues: Vec<TaskQueue> = (0..count)
+            .map(|_| Arc::new(Mutex::new(VecDeque::new())))
+            .collect();
 
-    // Create workers for other threads.
-    // Only create workers for non-WebAssembly platforms, or WebAssembly if atomics are enabled.
-    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-    for (i, task_queue) in queues.iter().cloned().enumerate().skip(1) {
+        // Create a worker for this thread.
         let mut other_task_queues = queues.clone();
-        other_task_queues.swap_remove(i);
-        let new_task = new_task.clone();
-        let closure = move || {
-            // println!("ID: {:?}", i);
-            create_worker(i, task_queue, other_task_queues, new_task);
+        other_task_queues.swap_remove(0);
+        create_worker(0, queues[0].clone(), other_task_queues, new_task.clone());
 
-            // Run the other threads forever waiting for work.
-            WORKER.with(|w| {
-                w.borrow().run_forever();
-            });
-        };
+        // Create workers for other threads.
+        // Only create workers for non-WebAssembly platforms, or WebAssembly if atomics are enabled.
+        #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+        for (i, task_queue) in queues.iter().cloned().enumerate().skip(1) {
+            let mut other_task_queues = queues.clone();
+            other_task_queues.swap_remove(i);
+            let new_task = new_task.clone();
+            let closure = move || {
+                // println!("ID: {:?}", i);
+                create_worker(i, task_queue, other_task_queues, new_task);
 
-        #[cfg(not(target_arch = "wasm32"))]
-        std::thread::spawn(closure);
+                // Run the other threads forever waiting for work.
+                WORKER.with(|w| {
+                    w.borrow().run_forever();
+                });
+            };
 
-        #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
-        kwasm::web_worker::spawn(closure);
-    }
+            #[cfg(not(target_arch = "wasm32"))]
+            std::thread::spawn(closure);
+
+            #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+            kwasm::web_worker::spawn(closure);
+        }
+    });
 }
 
 fn create_worker(
