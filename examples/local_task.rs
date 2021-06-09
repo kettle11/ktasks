@@ -5,9 +5,12 @@ fn main() {
     create_workers(3);
 
     let thread_id = std::thread::current().id();
+    println!("Main thread ID: {:?}", thread_id);
     let task0 = spawn(async move {
-        assert!(thread_id == std::thread::current().id());
-        println!("On main thread with ID: {:?}", thread_id);
+        println!(
+            "Running on thread with ID: {:?}",
+            std::thread::current().id()
+        );
     });
     task0.run();
 

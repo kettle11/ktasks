@@ -574,18 +574,18 @@ mod worker_enqueue_waker {
     struct WakerData<'a> {
         task: Arc<Task<'a>>,
         task_queue: TaskQueue<'a>,
-        worker_waker: WorkerWaker,
+        //worker_waker: WorkerWaker,
     }
 
     pub(crate) fn create<'a>(
         task: Arc<Task<'a>>,
         task_queue: TaskQueue<'a>,
-        worker_waker: WorkerWaker,
+        _worker_waker: WorkerWaker,
     ) -> Waker {
         let waker_data = Arc::new(WakerData {
             task,
             task_queue,
-            worker_waker,
+            //worker_waker,
         });
         let raw_waker = RawWaker::new(Arc::into_raw(waker_data) as *const (), &VTABLE);
         unsafe { Waker::from_raw(raw_waker) }
@@ -604,16 +604,17 @@ mod worker_enqueue_waker {
     unsafe fn wake(worker_data: *const ()) {
         println!("WAKING");
         let worker_data = Arc::from_raw(worker_data as *const WakerData);
-        // let task_active = worker_data.task.inner_task.lock().unwrap().is_some();
 
-        // if task_active {
-        // println!("TASK ACTIVE");
         worker_data
             .task_queue
             .lock()
             .unwrap()
-            .push_back(worker_data.task.clone()); // Is this clone unnecessary?
-                                                  //  }
+            .push_back(worker_data.task.clone());
+
+        // Run current thread tasks here to run the awoken task.
+        // This also means that single-threaded systems will run the task without
+        // needing to be workn up.
+        run_current_thread_tasks();
     }
 
     // Do not consume the data pointer
@@ -631,7 +632,13 @@ mod worker_enqueue_waker {
             .push_back(worker_data.task.clone());
         //  }
 
+        // Is this into_raw call correct
         Arc::into_raw(worker_data);
+
+        // Run current thread tasks here to run the awoken task.
+        // This also means that single-threaded systems will run the task without
+        // needing to be workn up.
+        run_current_thread_tasks();
     }
 
     unsafe fn drop(worker_data: *const ()) {
