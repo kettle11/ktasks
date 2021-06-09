@@ -454,6 +454,7 @@ impl<'a> Worker<'a> {
     }
 
     /// Run forever and block when waiting for new work.
+    #[allow(unused)]
     pub fn run_forever(&self) {
         let mut ran_a_task;
         loop {
